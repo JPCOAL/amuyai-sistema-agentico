@@ -1,0 +1,215 @@
+{
+  "name": "Amuyai - Worker Consultar Lead",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "email_busqueda"
+            },
+            {
+              "name": "trace_id"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        -32
+      ],
+      "id": "3ea9cde3-bae3-45d9-aace-05a8f463ba88",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appwAFw5RHxTbp733",
+          "mode": "list",
+          "cachedResultName": "Amuyai - Sistema Agentico",
+          "cachedResultUrl": "https://airtable.com/appwAFw5RHxTbp733"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblMwAByseJLBLIJ9",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://airtable.com/appwAFw5RHxTbp733/tblMwAByseJLBLIJ9"
+        },
+        "filterByFormula": "=   LOWER({Email}) = LOWER(\"{{ $json.email_busqueda }}\")",
+        "returnAll": false,
+        "limit": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        -32
+      ],
+      "id": "f3cebbd3-a598-4030-a25f-eff74f832a41",
+      "name": "Search records",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "MBs58Qwi6QntL0dg",
+          "name": "Airtable account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "edbe1b86-6882-41c8-9aaa-12e5fee9476e",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        -32
+      ],
+      "id": "358b42e2-21f1-412f-854c-0439379b3aa5",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "=   {\n     \"status\": \"success\",\n\"trace_id\": {{ JSON.stringify($('When Executed by Another Workflow').item.json.trace_id ?? null) }},\n     \"data\": {\n       \"id\": {{ JSON.stringify($json.id) }},\n       \"nombre_contacto\": {{ JSON.stringify($json.fields.Nombre_Contacto ?? null) }},\n       \"empresa\": {{ JSON.stringify($json.fields.Empresa ?? null) }},\n       \"email\": {{ JSON.stringify($json.fields.Email ?? null) }},\n       \"necesidad\": {{ JSON.stringify($json.fields.Necesidad ?? null) }},\n       \"calificacion\": {{ JSON.stringify($json.fields.Calificacion ?? null) }},\n       \"estado\": {{ JSON.stringify($json.fields.Estado ?? null) }},\n       \"session_id\": {{ JSON.stringify($json.fields.Session_ID ?? null) }},\n       \"fecha_registro\": {{ JSON.stringify($json.fields.Fecha_Registro ?? null) }}\n     }\n   }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        672,
+        -128
+      ],
+      "id": "32e705b7-5635-49a8-9f6d-69d80a548e53",
+      "name": "Salida Encontrado"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"status\": \"not_found\",\n  \"trace_id\": {{ JSON.stringify($('When Executed by Another Workflow').item.json.trace_id ?? null) }},\n  \"message\": \"No existe un lead registrado con ese correo.\",\n  \"email_busqueda\": {{ JSON.stringify($('When Executed by Another Workflow').item.json.email_busqueda) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        672,
+        64
+      ],
+      "id": "5d8fc4fb-107c-4865-a7b8-1c889dd2bc11",
+      "name": "Salida No Encontrado"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "=   {\n     \"status\": \"error\",\n     \"trace_id\": {{ JSON.stringify($('When Executed by Another Workflow').item.json.trace_id ?? null) }},\n     \"worker\": \"consultar_lead\",\n     \"message\": {{ JSON.stringify($json.error?.message ?? $json.error ?? \"Error desconocido al consultar Airtable\") }},\n     \"detalle\": {{ JSON.stringify($json.error?.description ?? null) }}\n   }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        448,
+        112
+      ],
+      "id": "8ce69ea2-b226-4daa-bb70-9980aef1f1d8",
+      "name": "Salida Error"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Search records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search records": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Salida Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Salida Encontrado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Salida No Encontrado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 60,
+    "availableInMCP": false
+  },
+  "versionId": "ef518869-4107-4172-b856-2ed79429116e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3766fd5e805e40399e1e57b278a2a7c32db5bfaa6fc78dab1c1b5350f9e9b805"
+  },
+  "nodeGroups": [],
+  "id": "yWiW6i4vlc1RKL9p",
+  "tags": []
+}
