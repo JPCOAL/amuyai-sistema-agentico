@@ -17,7 +17,7 @@ Este repositorio es acumulativo: el mismo sistema crece módulo a módulo hasta 
 |---|---|---|
 | M1 | Agente base, herramienta y observabilidad | Entregado |
 | M2 | Orquestación multi-agente con sub-workflows | Entregado |
-| M3 | Memoria persistente por Session_ID | Pendiente |
+| M3 | Memoria persistente por Session_ID | Entregado |
 | M4 | Integraciones reales vía OAuth2 | Pendiente |
 | M5 | Base documental con RAG | Pendiente |
 | M6 | Capa de voz | Pendiente |
@@ -231,8 +231,106 @@ La prueba se ejecutó manualmente desde el chat de prueba del Manager en n8n, en
 
 ---
 
+## Checkpoint 3 · Memoria persistente y resumen agéntico
+
+**Archivo:** [checkpoint3_memoria_romulo_coronado.json](checkpoint3_memoria_romulo_coronado.json)
+
+El Manager del CP2 se duplica como `Amuyai - Manager CP3` y suma una capa de memoria de largo plazo en Airtable, leída y escrita por `Session_ID`. Los dos Workers del CP2 no cambian.
+
+### Arquitectura
+
+```
+[When chat message received]
+            ↓
+     [Buscar Memoria] (Airtable Search por Session_ID)
+            ↓
+   [Usuario Recurrente] (IF)
+     true  ─────────────────────┐
+     false -> [Crear Memoria]   │
+            ↓                   │
+   [Preparar Contexto] <────────┘
+            ↓
+        [Router]  <- contexto inyectado entre delimitadores
+            ↓
+  Switch, Workers y Consolidar Salida (igual que en el CP2)
+            ↓
+   [Log Trazabilidad] (Slack)
+            ↓
+   [Calcular Memoria]
+            ↓
+   [Requiere Resumen] (IF, más de 5 mensajes)
+     false -> [Guardar Memoria] (Create or Update)
+     true  -> [Leer Historial] -> [Resumir Conversacion] -> [Guardar Memoria con Resumen] (Create or Update)
+            ↓
+     [Respuesta Chat]
+```
+
+### Tabla de memoria `Memoria_Sesiones`
+
+| Campo | Tipo | Contenido |
+|---|---|---|
+| `Session_ID` | Single line text (primario) | Clave de búsqueda y de escritura idempotente |
+| `Fecha_Actualizacion` | Last modified time | Automática |
+| `Resumen_Consolidado` | Long text | JSON con `asunto_principal`, `puntos_clave` y `accion_requerida` |
+| `Estado_Caso` | Single select | Nuevo, Registro en curso, Lead registrado, Seguimiento, Escalado, No comercial |
+| `Datos_Clave` | Long text | JSON con `nombre`, `empresa` y `email` |
+| `Contador_Mensajes` | Number | Intercambios desde el último resumen |
+
+### Componentes
+
+| Nodo | Rol |
+|---|---|
+| Buscar Memoria | Airtable Search inmediatamente después del trigger. Filtro exacto por `Session_ID`, Limit 1, Always Output Data |
+| Usuario Recurrente | IF determinista: si existe el `id` del registro, el usuario es recurrente |
+| Crear Memoria | Rama de usuario nuevo. Crea el registro inicial con estado Nuevo y contador 0 |
+| Preparar Contexto | Normaliza `user_name`, `last_summary`, `estado_caso`, `contador_mensajes` y `usuario_recurrente` con valores por defecto |
+| Router | Recibe la memoria al final de su System Message, entre `[INICIO DE CONTEXTO COMPARTIDO]` y `[FIN DEL CONTEXTO COMPARTIDO]` |
+| Calcular Memoria | Calcula el nuevo estado sin IA (categoría del Router + `status` del Worker) y suma 1 al contador |
+| Requiere Resumen | IF: el resumen se dispara cuando la conversación supera los 5 mensajes |
+| Leer Historial | Chat Memory Manager que lee la conversación desde la memoria volátil de la sesión |
+| Resumir Conversacion | Basic LLM Chain con `gpt-5-nano` y Structured Output Parser |
+| Guardar Memoria / Guardar Memoria con Resumen | Airtable Create or Update con `Session_ID` como campo de coincidencia |
+
+### Decisiones de diseño
+
+**La escritura es idempotente.** Las dos escrituras usan Create or Update por `Session_ID`: si el registro existe lo actualizan, si no lo crean. Nunca duplican.
+
+**La transcripción no se guarda en Airtable.** El historial se lee de la memoria volátil de la sesión y solo se persiste el JSON del resumen. Los logs técnicos van a Slack, no a la base.
+
+**El estado del caso se calcula sin IA.** Es una traducción determinista de la categoría y el `status`. Un error del Worker o un mensaje no comercial no sobrescriben un estado más avanzado.
+
+**El contexto inyectado va al final del System Message.** La parte fija del prompt queda arriba y la variable abajo, lo que permite aprovechar Prompt Caching. El bloque se declara como datos de solo lectura, nunca como instrucciones.
+
+**Una falla de memoria no corta la conversación.** Los nodos de Airtable reintentan (Retry On Fail) y continúan con On Error en Continue.
+
+### Prueba de ejecución manual
+
+La prueba se ejecutó manualmente desde el chat de prueba de `Amuyai - Manager CP3`, en una sola sesión.
+
+| Paso | Detalle |
+|---|---|
+| Personaje de prueba | Andrea Torres, Inversiones Pacífico, andrea.torres@inversionespacifico.pe |
+| Turno 1 | "Hola, quisiera saber qué servicios ofrecen". Usuario nuevo: IF en false, se crea el registro con estado Nuevo |
+| Turno 2 | "Gracias. ¿También trabajan con empresas de Chile?". Usuario recurrente: IF en true, sin registro duplicado |
+| Preparación | Para no gastar créditos en seis mensajes, el contador se fijó manualmente en 5 en Airtable |
+| Turno 3 | "Mi correo es andrea.torres@inversionespacifico.pe". Se activa la rama de resumen: `Resumen_Consolidado` con el JSON, `Datos_Clave` con nombre, empresa y correo, contador en 0 |
+| Turno 4 | "¿Cuánto tiempo toma una implementación?". El Router recibe "El usuario se llama Andrea Torres" y el resumen consolidado; el contador sube a 1 |
+| Auditoría visual | Todos los nodos de cada ruta en verde en n8n |
+
+### Stack
+
+| Tecnología | Rol |
+|---|---|
+| n8n Cloud | Orquestador |
+| OpenAI `gpt-5-mini` | Router (sin cambios desde el CP2) |
+| OpenAI `gpt-5-nano` | Modelo económico de summarization, elegido de la lista de n8n con la credencial Gateway credits |
+| Airtable | Leads y memoria de largo plazo (`Memoria_Sesiones`) |
+| Slack | Log de trazabilidad y alertas |
+
+---
+
 ## Sobre las credenciales
 
 Los archivos JSON de este repositorio no contienen claves de API ni tokens. n8n las sustituye por un identificador interno de conexión que solo tiene sentido dentro de la cuenta de origen.
 
-Para reconstruir el sistema hay que importar el JSON en n8n y reconectar cada integración con credenciales propias, además de reapuntar los identificadores de la base de Airtable y del canal de Slack.
+Para reconstruir el sistema hay que importar el JSON en n8n y reconectar cada integración con credenciales propias, además de reapuntar los identificadores de la base de Airtable (tablas `Leads` y `Memoria_Sesiones`) y del canal de Slack.
